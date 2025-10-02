@@ -1,0 +1,57 @@
+version: "3.9"
+services:
+  mariadb:
+    image: docker.io/bitnami/mariadb:10.5
+    volumes:
+      - ./w4/dev-sample-data/populate_db.sql:/docker-entrypoint-initdb.d/populate_db.sql:ro # Script runs automatically.
+      - ./w4/dev-sample-data:/filmpac/dev-sample-data:ro
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+      - MARIADB_DATABASE=bitnami_wordpress
+      - MARIADB_USER=bn_wordpress
+  wordpress:
+    depends_on:
+      - mariadb
+    restart: on-failure
+    image: docker.io/bitnami/wordpress-nginx:latest
+    container_name: filmpac-w4-api-dev
+    labels:
+      com.filmpac.w4-api.version: "beta-0.1.0"
+    ports:
+      - "80:8080"
+      - "443:8443"
+    volumes:
+      - ./w4:/filmpac/wordpress-setup
+      - ./.env:/filmpac/wordpress-setup/.env:ro # Variables for script below
+      - ./w4/set_up_w4.sh:/docker-entrypoint-init.d/set_up_w4.sh:ro # Script runs automatically.
+      - ./plugins/filmpac-data-extensions:/opt/bitnami/wordpress/wp-content/plugins/filmpac-data-extensions
+      - ./plugins/filmpac-rest-api-extensions:/opt/bitnami/wordpress/wp-content/plugins/filmpac-rest-api-extensions
+      - ./themes/filmpac-w4-theme:/opt/bitnami/wordpress/wp-content/themes/filmpac-w4-theme
+    environment:
+      - BITNAMI_DEBUG="true"  # NB quotes
+      - WORDPRESS_AUTO_UPDATE_LEVEL=major
+      - "WORDPRESS_DATA_TO_PERSIST= " # NB space
+      - WORDPRESS_SKIP_BOOTSTRAP=yes
+      # Database
+      - ALLOW_EMPTY_PASSWORD=yes
+      - "WORDPRESS_DATABASE_HOST=${DB_HOST}"
+      - "WORDPRESS_DATABASE_NAME=${DB_NAME}"
+      - "WORDPRESS_DATABASE_PORT_NUMBER=${DB_PORT}"
+      - "WORDPRESS_DATABASE_USER=${DB_USER}"
+      # E-mail
+      - "WORDPRESS_SMTP_HOST=${MAIL_HOST}"
+      - "WORDPRESS_SMTP_PASSWORD=${MAIL_PASSWORD}"
+      - "WORDPRESS_SMTP_PORT=${MAIL_PORT}"
+      - "WORDPRESS_SMTP_USER=${MAIL_USER}"
+      # PHP
+      - PHP_MAX_EXECUTION_TIME=120
+      - PHP_MAX_INPUT_TIME=300
+      - PHP_MAX_INPUT_VARS=1000
+      - PHP_MEMORY_LIMIT=512M
+      - PHP_POST_MAX_SIZE=25M
+      - PHP_UPLOAD_MAX_FILESIZE=25M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200k"
+        max-file: "10"

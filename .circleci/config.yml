@@ -1,0 +1,206 @@
+version: 2.1
+
+parameters:
+  skip-integration-tests:
+    type: boolean
+    default: false
+
+orbs:
+#  api-test: postman/newman@0.0.2
+  aws-ecr: circleci/aws-ecr@7.3.0
+  aws-ecs: circleci/aws-ecs@2.2.1
+
+workflows:
+  version: 2
+  deploy:
+    jobs:
+      - build-prod:
+          filters:
+            branches:
+              only: master
+      - aws-ecs/deploy-service-update:
+          name: deploy-prod
+          requires:
+            - build-prod
+          filters:
+            branches:
+              only: master
+          cluster-name: "${CLUSTER_PROD}"
+          family: "${FAMILY_PROD}"
+          service-name: "${SERVICE_PROD}"
+          container-image-name-updates: "container=com-filmpac-wp-staging,image-and-tag=${AWS_ECR_ACCOUNT_URL}/com-filmpac-wp:${CIRCLE_SHA1}"
+      - build-stag:
+          filters:
+            branches:
+              only: staging
+#      - run-integration-tests:
+#          requires:
+#            - build-stag
+      - aws-ecs/deploy-service-update:
+          name: deploy-stag
+          requires:
+            - build-stag
+#            - run-integration-tests
+          filters:
+            branches:
+              only: staging
+          cluster-name: FilmpacW4ApiStagStack-StagingClusterD0FDCA09-fd3yC4F9yMen
+          family: FilmpacW4ApiStagStackWpServiceTaskDef35C91491
+          container-image-name-updates: "container=com-filmpac-wp-staging,image-and-tag=${AWS_ECR_ACCOUNT_URL}/com-filmpac-wp-staging:${CIRCLE_SHA1}"
+          service-name: FilmpacW4ApiStagStack-WpService1D0B405F-KbFia6lsppeY
+
+jobs:
+  build-stag:
+    machine: true
+    steps:
+      - run:
+          name: Upgrade Docker
+          command: |
+            set -x
+            ver=$(docker --version)
+            major="version 20"
+            if [[ "$ver" == *"$major"* ]]; then
+              circleci-agent step halt
+            fi
+            sudo apt-get remove docker docker.io
+            sudo apt-get update
+            sudo apt-get install ca-certificates curl gnupg lsb-release
+            sudo curl -L https://download.docker.com/linux/ubuntu/gpg |
+              sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+            echo \
+              "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
+              $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+            sudo apt-get update
+            sudo apt-get install docker-ce
+            docker --version
+      - run:
+          name: Upgrade docker-compose
+          command: |
+            set -x
+            ver=$(docker-compose --version)
+            major="version v2"
+            if [[ "$ver" == *"$major"* ]]; then
+              circleci-agent step halt
+            fi
+            sudo rm /usr/local/bin/docker-compose
+            sudo mkdir /usr/lib/docker/cli-plugins
+            sudo curl -L https://github.com/docker/compose/releases/download/v2.2.1/docker-compose-linux-x86_64 -o /usr/lib/docker/cli-plugins/docker-compose
+            sudo chmod +x /usr/lib/docker/cli-plugins/docker-compose
+            sudo ln -sf /usr/lib/docker/cli-plugins/docker-compose /usr/bin/docker-compose
+            docker-compose --version
+      - checkout
+      - run:
+          name: Build container
+          command: |
+            set -x
+            docker-compose -f docker-compose.stag.yml --env-file .env.stag  --verbose up -d --wait
+            docker inspect filmpac-w4-api-stag
+      - run:
+          name: Set up WordPress
+          command: |
+            set -x
+            echo "Waiting for WordPress setup to start ..."
+            container="$(docker ps --quiet --latest)"
+            while : ; do
+              test \
+                "$(docker exec $container test -f /opt/bitnami/wordpress/.maintenance && echo 0 || echo 1)" \
+                -eq 0 \
+              && break
+              sleep 15
+            done
+            while : ; do
+              test \
+                "$(docker exec $container test -f /opt/bitnami/wordpress/.maintenance && echo 0 || echo 1)" \
+                -eq 0 \
+              || break
+              echo "Waiting for WordPress setup to complete ..."
+              sleep 15
+            done
+            echo "WordPress setup is complete."
+            docker-compose logs
+            docker exec "$container" less /opt/bitnami/wordpress/wp-config.php
+      - run:
+          name: Save container as new image
+          command: |
+            set -x
+            repo="${AWS_ECR_ACCOUNT_URL}/com-filmpac-wp-staging"
+            tag="${CIRCLE_SHA1}"
+            echo "Performing some cleanup on the new image; this may take a while ..."
+            docker export -o temp.tar $(docker ps --quiet --latest)
+            docker import \
+              --change 'CMD ["/opt/bitnami/scripts/nginx-php-fpm/run.sh"]' \
+              --change 'EXPOSE 8080/tcp' \
+              --change 'USER 1001' \
+              temp.tar "$repo:$tag"
+            docker image inspect "$repo:$tag"
+      - aws-ecr/ecr-login
+      - aws-ecr/push-image:
+          account-url: AWS_ECR_ACCOUNT_URL
+          repo: com-filmpac-wp-staging
+          tag: "${CIRCLE_SHA1}"
+  build-prod:
+    machine: true
+    resource_class: xlarge
+    steps:
+      - run:
+          name: Upgrade Docker
+          command: |
+            ver=$(docker -v)
+            major="version 20"
+            if [[ "$ver" == *"$major"* ]]; then
+              circleci-agent step halt
+            fi
+            sudo apt-get remove docker docker.io
+            sudo apt-get update
+            sudo apt-get install ca-certificates curl gnupg lsb-release
+            sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg |
+              sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+            echo \
+              "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
+              $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+            sudo apt-get update
+            sudo apt-get install docker-ce
+      - run:
+          name: Upgrade docker-compose
+          command: |
+            ver=$(docker-compose --version)
+            major="version v2"
+            if [[ "$ver" == *"$major"* ]]; then
+              circleci-agent step halt
+            fi
+            sudo rm /usr/local/bin/docker-compose
+            sudo mkdir /usr/lib/docker/cli-plugins
+            sudo curl -fsSL https://github.com/docker/compose/releases/download/v2.2.1/docker-compose-linux-x86_64 -o /usr/lib/docker/cli-plugins/docker-compose
+            sudo chmod +x /usr/lib/docker/cli-plugins/docker-compose
+            sudo ln -sf /usr/lib/docker/cli-plugins/docker-compose /usr/bin/docker-compose
+      - checkout
+      - run: docker-compose -f docker-compose.prod.yml --env-file .env.prod up -d --wait
+      - run: |
+          container="$(docker ps -ql)"
+          while : ; do
+            test "$(docker exec $container test -f /opt/bitnami/wordpress/.maintenance && echo 0 || echo 1)" -eq 0 && break
+            sleep 2
+          done
+          while : ; do
+            test "$(docker exec $container test -f /opt/bitnami/wordpress/.maintenance && echo 0 || echo 1)" -eq 0 || break
+            sleep 2
+          done
+      - run: |
+          docker commit filmpac-w4-api "${AWS_ECR_ACCOUNT_URL}/com-filmpac-wp:${CIRCLE_SHA1}"
+          docker export -o temp.tar $(docker ps -ql)
+          docker import -c 'CMD ["/opt/bitnami/scripts/nginx-php-fpm/run.sh"]' -c 'EXPOSE 8080/tcp' -c 'USER 1001' temp.tar "$repo:$tag"
+      - aws-ecr/ecr-login
+      - aws-ecr/push-image:
+          account-url: AWS_ECR_ACCOUNT_URL
+          repo: com-filmpac-wp
+          tag: "${CIRCLE_SHA1}"
+#  run-integration-tests:
+#    executor: api-test/postman-newman-docker
+#    steps:
+#      - unless:
+#          condition: << pipeline.parameters.skip-integration-tests >>
+#          steps:
+#            - checkout
+#            - api-test/newman-run:
+#                collection: ./.circleci/integration-tests/w4-endpoints-get-only.collection.json
+#                environment: ./.circleci/integration-tests/api-test.postman_environment.json

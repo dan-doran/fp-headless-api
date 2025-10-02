@@ -1,0 +1,13 @@
+const DISABLE_WP_CRON = true;
+const DISALLOW_FILE_EDIT = true;
+const DISALLOW_FILE_MODS = true;
+const SCRIPT_DEBUG = false;
+const WP_DEBUG_DISPLAY = false;
+const WP_MEMORY_LIMIT = '1500M';
+
+ini_set('display_errors', 0);
+
+// Detect HTTPS when used behind a load balancer @link https://codex.wordpress.org/Function_Reference/is_ssl#Notes
+if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
+    $_SERVER['HTTPS'] = 'on';
+}

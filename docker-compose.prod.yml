@@ -1,0 +1,36 @@
+version: "3.9"
+services:
+  wordpress:
+    restart: always
+    image: docker.io/bitnami/wordpress-nginx:latest
+    container_name: filmpac-w4-api
+    labels:
+      com.filmpac.w4-api.version: "beta-0.1.0"
+    ports:
+      - "80:8080"
+    volumes:
+      - ./w4:/filmpac/wordpress-setup
+      - ./.env.prod:/filmpac/wordpress-setup/.env:ro # Variables for script below
+      - ./w4/set_up_w4.sh:/docker-entrypoint-init.d/set_up_w4.sh:ro # Script runs automatically.
+    environment:
+      - WORDPRESS_AUTO_UPDATE_LEVEL=none
+      - "WORDPRESS_DATA_TO_PERSIST= " # NB space
+      - WORDPRESS_SKIP_BOOTSTRAP=yes
+      # Database
+      - "WORDPRESS_DATABASE_HOST=${DB_HOST}"
+      - "WORDPRESS_DATABASE_NAME=${DB_NAME}"
+      - "WORDPRESS_DATABASE_PASSWORD=${DB_PASSWORD}"
+      - "WORDPRESS_DATABASE_PORT_NUMBER=${DB_PORT}"
+      - "WORDPRESS_DATABASE_USER=${DB_USER}"
+      # E-mail
+      - "WORDPRESS_SMTP_HOST=${MAIL_HOST}"
+      - "WORDPRESS_SMTP_PASSWORD=${MAIL_PASSWORD}"
+      - "WORDPRESS_SMTP_PORT=${MAIL_PORT}"
+      - "WORDPRESS_SMTP_USER=${MAIL_USER}"
+      # PHP
+      - PHP_MAX_EXECUTION_TIME=120
+      - PHP_MAX_INPUT_TIME=300
+      - PHP_MAX_INPUT_VARS=1000
+      - PHP_MEMORY_LIMIT=1500M
+      - PHP_POST_MAX_SIZE=25M
+      - PHP_UPLOAD_MAX_FILESIZE=25M

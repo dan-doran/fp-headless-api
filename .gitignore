@@ -1,0 +1,10 @@
+# Transient Docker volumes
+themes
+plugins
+w4/.env
+
+# IDE files
+.idea
+
+# OS files
+.DS_Store
